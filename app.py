@@ -14,7 +14,7 @@ if openai_api_key is None:
 
 os.environ["LANGCHAIN_TRACING"] = "true"
 #os.environ["LANGCHAIN_API_KEY"] = os.environ["OPENAI_API_KEY"]
-os.environ["LANGCHAIN_PROJECT"] = "langchain-project"
+os.environ["LANGCHAIN_PROJECT"] = "langchain-Conversational_RAG"
 
 # FROM LANGCHAIN import OpenAI
 from langchain_openai import ChatOpenAI
@@ -56,9 +56,9 @@ chain = llm | output_parser
 
 from langchain_core.prompts import ChatPromptTemplate
 prompt = ChatPromptTemplate.from_template("Tell me a short joke about {topic}")
-prompt.invoke({"topic": "programming"})
+#prompt.invoke({"topic": "programming"})
 
-chain = prompt | llm | output_parser
+#chain = prompt | llm | output_parser
 # Invoke the chain with a specific topic
 #response1 = chain.invoke({"topic": "programming"})
 #print(response1)
@@ -76,8 +76,8 @@ human_message = HumanMessage(content = "Tell me about programming.")
 template=ChatPromptTemplate([
     ("system","You are helpful assistant that tells jokes"),
     ("human", "Tell me a joke about {topic}")])
-prompt_value=template.invoke(
-    {"topic":"Parrot"})
+#prompt_value=template.invoke(
+    #{"topic":"Parrot"})
 #prompt_value
 # Now we can use this prompt value with the LLM
 #response2 = llm.invoke(prompt_value)
@@ -215,3 +215,106 @@ rag_chain = (
 
 response = rag_chain.invoke("When did Salaar movie released?")
 print(f"RAG Response: {response}")
+
+question = "When did Salaar movie released?"
+
+
+
+
+
+
+# This section builds a retrieval-augmented generation (RAG) system using LangChain.
+# Purpose: To answer questions by retrieving relevant context from a document store and generating responses.
+#Now Building a Conversational RAG system
+from langchain_core.messages import AIMessage, HumanMessage
+chat_history=[]
+chat_history.extend([
+    HumanMessage(content=question),
+    AIMessage(content=response)
+])
+
+
+# This section builds a "contextualization" chain for conversational retrieval-augmented generation (RAG).
+# Purpose:
+# When a user asks a follow-up question in a chat, it may refer to previous context (e.g., "Who is the hero?").
+# This chain reformulates such questions into standalone questions that make sense without chat history.
+# 
+# - contextualize_q_system_prompt: Instructs the LLM to rewrite the user's question as a standalone question, using chat history if needed.
+# - contextualize_q_prompt: A ChatPromptTemplate that structures the prompt with a system message, chat history, and the latest user input.
+# - contextualize_chain: Combines the prompt, LLM, and output parser so that when invoked, it returns a reformulated standalone question.
+# - contextualize_chain.invoke(...): Runs the chain with a sample input and chat history to demonstrate how a follow-up question is rewritten.
+
+
+from langchain_core.prompts import MessagesPlaceholder
+
+contextualize_q_system_prompt = (
+    "Given a chat history and the latest user question "
+    "which might reference context in the chat history, "
+    "formulate a standalone question which can be understood "
+    "without the chat history. DO NOT answer the question, "
+    "just reformulate it if needed and otherwise return it as is."
+)
+
+contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
+
+# history_aware_retriever = create_history_aware_retriever(
+#     llm, retriever, contextualize_q_prompt
+# )
+
+contextualize_chain = contextualize_q_prompt | llm | StrOutputParser()
+contextualize_chain.invoke({"input": "Who is the hero?", "chat_history": chat_history})
+#print("Contextualized Question:", contextualize_chain.invoke({"input": "Who is the hero?", "chat_history": chat_history}))
+
+
+# This section creates a history-aware retriever that uses the LLM to contextualize questions based on chat history.
+from langchain.chains import create_history_aware_retriever
+
+history_aware_retriever = create_history_aware_retriever(
+    llm, retriever, contextualize_q_prompt
+)
+
+history_aware_retriever.invoke({"input": "Who is the hero?", "chat_history": chat_history})
+
+
+
+
+
+# This section creates a retrieval-augmented generation (RAG) chain that combines a retriever and a question-answering chain.
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+
+qa_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful AI assistant. Use the following context to answer the user's question."),
+    # ("system", "Tell me joke on Programming"),
+    ("system", "Context: {context}"),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}")
+])
+
+question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+res1=rag_chain.invoke({"input": "Who is the hero?", "chat_history": chat_history})
+print(res1)
+
+#i want to use the logging module to log the response
+import logging
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Log the response
+logging.info(f"RAG Response: {res1}")
+# Log the chat history
+logging.info(f"Chat History: {chat_history}")
+# Log the question
+logging.info(f"Question: {question}")
+# Log the vectorstore information
+logging.info(f"Vectorstore: {vectorstore}")
+# Log the prompt used for the RAG chain
+logging.info(f"Prompt used for RAG chain: {qa_prompt}")
